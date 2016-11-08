@@ -1,0 +1,114 @@
+---
+title: "Activity Prediction"
+author: "Daniel"
+date: "Nov.8th 2016"
+output: html_document
+---
+#Introduction
+  One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har
+  
+  To predict the movements, algorithms of random forest and linear discriminant analysis are taken into consideration. Experiments show that random forest performs better. At last, I predict the 20 activities using the algorithm examined before.
+  
+# Clean data and build model
+  The first step is to load the data
+```{r cache=TRUE}
+download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","train.csv")
+download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","test.csv")
+testing <- read.csv("test.csv")
+training <- read.csv("train.csv")
+```
+  The second step is to clean it. As we could see in the dataset, information such as the name and number of testers is not relavent. So to remove these columns out of our dataset:
+```{r cache=TRUE}
+testing <- testing[,-c(1:7)]
+training <- training[,-c(1:7)]
+```
+  However, there are still a lot of NAs in the dataset. Most of them are average or std of other variables. They are also not concerned about my problem. In my project, I removed all NAs.
+```{r cache=TRUE}
+index1 <- vector("logical",length=0L)
+index2 <- index1
+for(i in 1:153){
+  index1[i]<- (sum(is.na(training[,i]))==0)
+}
+for(i in 1:153){
+  index2[i]<- (sum(is.na(testing[,i]))==0)
+}
+index <-index1 & index2
+training <- training[,index]
+testing <- testing[,index]
+for (i in 1:52){
+  training[[i]] <- as.numeric(training[[i]])
+  testing[[i]] <- as.numeric(testing[[i]])
+}
+```
+#Building Models and Optimization
+  Since the testing dataset is too small and its objective classes are not available, the only way we can optimize between classifiers is to do a cross validation.
+  So the first step is to sample from training set:
+```{r results="hide"}
+library(caret)
+set.seed(123)
+trainindex <- createDataPartition(y=training$classe, p=0.8,list=FALSE)
+```
+  So to predict classifications, there are mutiple approaches. Two of them that are very efficient and useful are Random Forest(RF) and Linear Discriminant Analysis(LDA).
+  But there are still too many variables in the dataset, which could reduce the efficiency of those two algorithms. So I choose to do a primary component analysis(PCA) and choose 10 variables which represents 96% of variance.
+  Two appoaches are written in functions as below:
+```{r cache=TRUE}
+library(randomForest)
+library(MASS)
+algPredrf <- function(training,testing){
+  #primary component analysis
+  trpca <- prcomp(training[,-53])
+  sum(trpca$sdev[1:10]^2)/sum(trpca$sdev^2)
+  trainingNew <- trpca$x[,1:10]
+  testingNew <- predict(trpca,newdata=testing)[,1:10]
+  
+  #random forest
+  mdr <- randomForest(training$classe~.,data=trainingNew)
+  predict(mdr,testingNew)
+}
+
+
+algPredld <- function(training,testing){
+  #primary component analysis
+  trpca <- prcomp(training[,-53])
+  sum(trpca$sdev[1:10]^2)/sum(trpca$sdev^2)
+  trainingNew <- trpca$x[,1:10]
+  testingNew <- predict(trpca,newdata=testing)[,1:10]
+  
+  #linear discriminat analysis
+  mdl <- lda(training$classe~.,data=as.data.frame(trainingNew))
+  p<-predict(mdl,as.data.frame(testingNew))
+  p[[1]]
+}
+```
+  Now compare how these two approaches perform:
+```{r cache=TRUE}
+tablerf <- table(algPredrf(training[trainindex,],training[-trainindex,]),training$classe[-trainindex])
+tableld <- table(algPredld(training[trainindex,],training[-trainindex,]),training$classe[-trainindex])
+```
+  The prediction conclusion of RF shows below: 
+```{r}
+tablerf 
+```
+  Its accuracy would be
+```{r}
+sum(diag(tablerf))/sum(tablerf)
+```
+  And now LDA:
+```{r}
+tableld 
+```
+  Its accuracy is only
+```{r}
+sum(diag(tableld))/sum(tableld)
+```
+  So clearly RF algorithm performs better.
+  
+#Prediction
+  Using RF algorithm, the prediction of the testing data is:
+```{r cache=TRUE}
+algPredrf(training[trainindex,],testing)
+```
+  We could estimate the expected out of sample error:
+```{r}
+1-sum(diag(tablerf))/sum(tablerf)
+```
